@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Salle IMMO C — Agenda partagé</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+<div id="auth-view" class="auth-wrap hidden">
+  <div class="auth-card">
+    <h1>Salle IMMO C</h1>
+    <p class="muted">Agenda partagé de la salle de réunion</p>
+
+    <div class="tabs">
+      <button id="tab-login" class="tab active">Connexion</button>
+      <button id="tab-register" class="tab">Créer un compte</button>
+    </div>
+
+    <form id="login-form" class="auth-form">
+      <label>Nom d'utilisateur ou email
+        <input type="text" name="username" required autocomplete="username" />
+      </label>
+      <label>Mot de passe
+        <input type="password" name="password" required autocomplete="current-password" />
+      </label>
+      <button type="submit" class="btn primary">Se connecter</button>
+    </form>
+
+    <form id="register-form" class="auth-form hidden">
+      <label>Nom d'utilisateur
+        <input type="text" name="username" required minlength="2" />
+      </label>
+      <label>Email
+        <input type="email" name="email" required />
+      </label>
+      <label>Mot de passe (min. 6 caractères)
+        <input type="password" name="password" required minlength="6" autocomplete="new-password" />
+      </label>
+      <button type="submit" class="btn primary">Créer mon compte</button>
+    </form>
+
+    <p id="auth-msg" class="msg"></p>
+  </div>
+</div>
+
+<div id="app-view" class="hidden">
+  <header class="topbar">
+    <div>
+      <h1>Salle IMMO C</h1>
+      <span id="week-label" class="muted"></span>
+    </div>
+    <div class="actions">
+      <button id="prev-week" class="btn">◀ Semaine précédente</button>
+      <button id="this-week" class="btn">Cette semaine</button>
+      <button id="next-week" class="btn">Semaine suivante ▶</button>
+      <button id="refresh-btn" class="btn" title="Recharger manuellement">↻ Rafraîchir</button>
+      <span id="user-label" class="user-chip"></span>
+      <button id="logout-btn" class="btn ghost">Se déconnecter</button>
+    </div>
+  </header>
+
+  <main class="calendar-wrap">
+    <div id="calendar" class="calendar"></div>
+  </main>
+
+  <div id="autosave-badge" class="autosave">Sauvegarde auto activée</div>
+</div>
+
+<!-- Booking modal -->
+<div id="modal" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2 id="modal-title">Nouvelle réservation</h2>
+      <button id="modal-close" class="icon-btn">✕</button>
+    </div>
+    <form id="booking-form">
+      <input type="hidden" name="id" />
+      <label>Titre *
+        <input type="text" name="title" required maxlength="200" />
+      </label>
+      <div class="row">
+        <label>Début *
+          <input type="datetime-local" name="start" required />
+        </label>
+        <label>Fin *
+          <input type="datetime-local" name="end" required />
+        </label>
+      </div>
+      <label>Description
+        <textarea name="description" rows="3"></textarea>
+      </label>
+      <label>Invités (emails, séparés par virgule)
+        <input type="text" name="guests" placeholder="personne1@ex.com, personne2@ex.com" />
+      </label>
+      <label id="invite-row" class="checkbox">
+        <input type="checkbox" name="sendInvite" checked />
+        Envoyer une invitation calendrier aux invités et à moi-même
+      </label>
+      <p id="booking-msg" class="msg"></p>
+      <div class="modal-footer">
+        <button type="button" id="delete-btn" class="btn danger hidden">Supprimer</button>
+        <div class="spacer"></div>
+        <button type="button" id="cancel-btn" class="btn ghost">Annuler</button>
+        <button type="submit" id="save-btn" class="btn primary">Enregistrer</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

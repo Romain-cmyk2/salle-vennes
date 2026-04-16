@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: salle-vennes
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: NODE_ENV
+        value: production
+      - key: BREVO_API_KEY
+        sync: false
+      - key: MAIL_SENDER_EMAIL
+        value: romain@sconseil.be
+      - key: MAIL_SENDER_NAME
+        value: Salle IMMO C
+      - key: ROOM_NAME
+        value: Salle IMMO C
+      - key: ROOM_LOCATION
+        value: Salle IMMO C - Rue des Vennes 294, 4020 Liège
+    disk:
+      name: data
+      mountPath: /opt/render/project/src
+      sizeGB: 1
