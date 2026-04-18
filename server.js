@@ -6,7 +6,7 @@ const bcrypt = require('bcryptjs');
 const path = require('path');
 const brevo = require('@getbrevo/brevo');
 const ics = require('ics');
-const db = require('./db');
+const { db, init } = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -46,16 +46,18 @@ const MAIL_SENDER_EMAIL = process.env.MAIL_SENDER_EMAIL || 'romain@sconseil.be';
 const MAIL_SENDER_NAME = process.env.MAIL_SENDER_NAME || ROOM_NAME;
 
 // --- Auth routes ---
-app.post('/api/register', (req, res) => {
+app.post('/api/register', async (req, res) => {
   const { username, email, password } = req.body || {};
   if (!username || !email || !password) return res.status(400).json({ error: 'Champs requis manquants' });
   if (password.length < 6) return res.status(400).json({ error: 'Mot de passe trop court (min. 6 caractères)' });
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Email invalide' });
   try {
     const hash = bcrypt.hashSync(password, 10);
-    const info = db.prepare('INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)')
-      .run(username.trim(), email.trim().toLowerCase(), hash);
-    req.session.userId = info.lastInsertRowid;
+    const info = await db.execute({
+      sql: 'INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)',
+      args: [username.trim(), email.trim().toLowerCase(), hash]
+    });
+    req.session.userId = Number(info.lastInsertRowid);
     req.session.username = username.trim();
     req.session.email = email.trim().toLowerCase();
     res.json({ ok: true, username: req.session.username });
@@ -65,13 +67,17 @@ app.post('/api/register', (req, res) => {
   }
 });
 
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'Champs requis manquants' });
-  const u = db.prepare('SELECT * FROM users WHERE username = ? OR email = ?').get(username.trim(), username.trim().toLowerCase());
+  const r = await db.execute({
+    sql: 'SELECT * FROM users WHERE username = ? OR email = ?',
+    args: [username.trim(), username.trim().toLowerCase()]
+  });
+  const u = r.rows[0];
   if (!u) return res.status(401).json({ error: 'Identifiants invalides' });
   if (!bcrypt.compareSync(password, u.password_hash)) return res.status(401).json({ error: 'Identifiants invalides' });
-  req.session.userId = u.id;
+  req.session.userId = Number(u.id);
   req.session.username = u.username;
   req.session.email = u.email;
   res.json({ ok: true, username: u.username });
@@ -87,28 +93,31 @@ app.get('/api/me', (req, res) => {
 });
 
 // --- Bookings ---
-app.get('/api/bookings', requireAuth, (req, res) => {
+app.get('/api/bookings', requireAuth, async (req, res) => {
   const { from, to } = req.query;
-  let rows;
+  let r;
   if (from && to) {
-    rows = db.prepare(`
-      SELECT b.*, u.username AS owner_username
-      FROM bookings b JOIN users u ON u.id = b.user_id
-      WHERE b.end_iso > ? AND b.start_iso < ?
-      ORDER BY b.start_iso ASC
-    `).all(from, to);
+    r = await db.execute({
+      sql: `
+        SELECT b.*, u.username AS owner_username
+        FROM bookings b JOIN users u ON u.id = b.user_id
+        WHERE b.end_iso > ? AND b.start_iso < ?
+        ORDER BY b.start_iso ASC
+      `,
+      args: [from, to]
+    });
   } else {
-    rows = db.prepare(`
+    r = await db.execute(`
       SELECT b.*, u.username AS owner_username
       FROM bookings b JOIN users u ON u.id = b.user_id
       ORDER BY b.start_iso ASC
-    `).all();
+    `);
   }
-  res.json({ bookings: rows });
+  res.json({ bookings: r.rows });
 });
 
-function overlaps(startIso, endIso, excludeId = null) {
-  const q = excludeId
+async function overlaps(startIso, endIso, excludeId = null) {
+  const sql = excludeId
     ? `SELECT b.id, b.title, b.start_iso, b.end_iso, u.username
        FROM bookings b JOIN users u ON u.id = b.user_id
        WHERE b.end_iso > ? AND b.start_iso < ? AND b.id != ?`
@@ -116,7 +125,8 @@ function overlaps(startIso, endIso, excludeId = null) {
        FROM bookings b JOIN users u ON u.id = b.user_id
        WHERE b.end_iso > ? AND b.start_iso < ?`;
   const args = excludeId ? [startIso, endIso, excludeId] : [startIso, endIso];
-  return db.prepare(q).get(...args);
+  const r = await db.execute({ sql, args });
+  return r.rows[0];
 }
 
 function formatConflict(c) {
@@ -133,15 +143,22 @@ app.post('/api/bookings', requireAuth, async (req, res) => {
   if (isNaN(s) || isNaN(e) || e <= s) return res.status(400).json({ error: 'Horaires invalides' });
   if ((e - s) > 8 * 3600_000) return res.status(400).json({ error: 'Durée maximale : 8 heures' });
   if (s < new Date(Date.now() - 60_000)) return res.status(400).json({ error: 'Impossible de réserver dans le passé' });
-  { const c = overlaps(start_iso, end_iso); if (c) return res.status(409).json({ error: 'Ce créneau chevauche ' + formatConflict(c) }); }
+  { const c = await overlaps(start_iso, end_iso); if (c) return res.status(409).json({ error: 'Ce créneau chevauche ' + formatConflict(c) }); }
 
   const guestList = Array.isArray(guests) ? guests.filter(Boolean).map(x => String(x).trim()).filter(Boolean) : [];
-  const info = db.prepare(`
-    INSERT INTO bookings (user_id, title, description, start_iso, end_iso, guests)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(req.session.userId, title.trim(), description || '', start_iso, end_iso, JSON.stringify(guestList));
+  const info = await db.execute({
+    sql: `
+      INSERT INTO bookings (user_id, title, description, start_iso, end_iso, guests)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `,
+    args: [req.session.userId, title.trim(), description || '', start_iso, end_iso, JSON.stringify(guestList)]
+  });
 
-  const booking = db.prepare('SELECT * FROM bookings WHERE id = ?').get(info.lastInsertRowid);
+  const bookingRes = await db.execute({
+    sql: 'SELECT * FROM bookings WHERE id = ?',
+    args: [Number(info.lastInsertRowid)]
+  });
+  const booking = bookingRes.rows[0];
 
   let emailResult = { sent: false };
   if (sendInvite && guestList.length > 0) {
@@ -157,34 +174,40 @@ app.post('/api/bookings', requireAuth, async (req, res) => {
 
 app.put('/api/bookings/:id', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const existing = db.prepare('SELECT * FROM bookings WHERE id = ?').get(id);
+  const existingRes = await db.execute({ sql: 'SELECT * FROM bookings WHERE id = ?', args: [id] });
+  const existing = existingRes.rows[0];
   if (!existing) return res.status(404).json({ error: 'Réservation introuvable' });
-  if (existing.user_id !== req.session.userId) return res.status(403).json({ error: 'Non autorisé' });
+  if (Number(existing.user_id) !== req.session.userId) return res.status(403).json({ error: 'Non autorisé' });
 
   const { title, description, start_iso, end_iso, guests, sendInvite } = req.body || {};
   if (!title || !start_iso || !end_iso) return res.status(400).json({ error: 'Champs requis manquants' });
   const s = new Date(start_iso), e = new Date(end_iso);
   if (isNaN(s) || isNaN(e) || e <= s) return res.status(400).json({ error: 'Horaires invalides' });
   if ((e - s) > 8 * 3600_000) return res.status(400).json({ error: 'Durée maximale : 8 heures' });
-  { const c = overlaps(start_iso, end_iso, id); if (c) return res.status(409).json({ error: 'Ce créneau chevauche ' + formatConflict(c) }); }
+  { const c = await overlaps(start_iso, end_iso, id); if (c) return res.status(409).json({ error: 'Ce créneau chevauche ' + formatConflict(c) }); }
 
   const guestList = Array.isArray(guests) ? guests.filter(Boolean).map(x => String(x).trim()).filter(Boolean) : [];
-  db.prepare(`
-    UPDATE bookings SET title=?, description=?, start_iso=?, end_iso=?, guests=?, updated_at=datetime('now')
-    WHERE id = ?
-  `).run(title.trim(), description || '', start_iso, end_iso, JSON.stringify(guestList), id);
+  await db.execute({
+    sql: `
+      UPDATE bookings SET title=?, description=?, start_iso=?, end_iso=?, guests=?, updated_at=datetime('now')
+      WHERE id = ?
+    `,
+    args: [title.trim(), description || '', start_iso, end_iso, JSON.stringify(guestList), id]
+  });
 
-  const booking = db.prepare('SELECT * FROM bookings WHERE id = ?').get(id);
+  const bookingRes = await db.execute({ sql: 'SELECT * FROM bookings WHERE id = ?', args: [id] });
+  const booking = bookingRes.rows[0];
 
   res.json({ ok: true, booking, email: { sent: false } });
 });
 
-app.delete('/api/bookings/:id', requireAuth, (req, res) => {
+app.delete('/api/bookings/:id', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const existing = db.prepare('SELECT * FROM bookings WHERE id = ?').get(id);
+  const existingRes = await db.execute({ sql: 'SELECT * FROM bookings WHERE id = ?', args: [id] });
+  const existing = existingRes.rows[0];
   if (!existing) return res.status(404).json({ error: 'Réservation introuvable' });
-  if (existing.user_id !== req.session.userId) return res.status(403).json({ error: 'Non autorisé' });
-  db.prepare('DELETE FROM bookings WHERE id = ?').run(id);
+  if (Number(existing.user_id) !== req.session.userId) return res.status(403).json({ error: 'Non autorisé' });
+  await db.execute({ sql: 'DELETE FROM bookings WHERE id = ?', args: [id] });
   res.json({ ok: true });
 });
 
@@ -240,6 +263,11 @@ async function sendIcsInvite({ booking, organizer, guests }) {
 // Fallback: serve index.html for root
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-app.listen(PORT, () => {
-  console.log(`Salle Vennes — serveur démarré sur http://localhost:${PORT}`);
+init().then(() => {
+  app.listen(PORT, () => {
+    console.log(`Salle Vennes — serveur démarré sur http://localhost:${PORT}`);
+  });
+}).catch(err => {
+  console.error('Erreur init DB :', err);
+  process.exit(1);
 });

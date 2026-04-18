@@ -12,6 +12,10 @@ services:
         value: production
       - key: BREVO_API_KEY
         sync: false
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
       - key: MAIL_SENDER_EMAIL
         value: romain@sconseil.be
       - key: MAIL_SENDER_NAME
@@ -20,7 +24,3 @@ services:
         value: Salle IMMO C
       - key: ROOM_LOCATION
         value: Salle IMMO C - Rue des Vennes 294, 4020 Liège
-    disk:
-      name: data
-      mountPath: /opt/render/project/src
-      sizeGB: 1
